@@ -1,0 +1,206 @@
+    /*
+      please go through the enrollment file to get the gist (what does this even mean?)
+      
+      this initilises the scanner, put it somewhere .. maybe a button      
+    */    
+    
+    public void Iniciar(){
+        capture.addDataListener(new DPFPDataAdapter() {
+            @Override 
+            public void dataAcquired(final DPFPDataEvent e) {
+                ProcessCapture(e.getSample());                  
+            };
+        });
+
+        capture.addReaderStatusListener(new DPFPReaderStatusAdapter() {
+            @Override 
+            public void readerConnected(final DPFPReaderStatusEvent e) {
+                System.out.println("this is " + e.getReaderStatus());
+            }
+
+            @Override 
+            public void readerDisconnected(final DPFPReaderStatusEvent e) {
+                System.out.println("reader connected" + e.getReaderStatus());
+            }
+        });
+
+        capture.addSensorListener(new DPFPSensorAdapter() {
+            @Override 
+            public void fingerTouched(final DPFPSensorEvent e) {
+                if(capture.isStarted())
+                fingerSpinner.setVisible(true);
+            }
+
+            @Override 
+            public void fingerGone(final DPFPSensorEvent e) {
+                System.out.println("Finger gone " + e);
+                System.out.println(" scanner stat 2 " + capture.isStarted());
+                if(capture.isStarted()){
+                    capture.stopCapture();                
+                    fingerSpinner.setVisible(false);
+                }
+            }
+        });
+
+        capture.addErrorListener(new DPFPErrorAdapter(){
+            public void errorReader(final DPFPErrorEvent e){            
+                System.out.println("Something wong" + e.getError());
+            }
+        });
+    }
+    
+    // this code is the one that first gets the scanner sample
+    public void ProcessCapture (DPFPSample sample){
+        // this gets the scanned finger
+        //String iPath = "file:C:\\Users\\kandyb15\\Documents\\NetBeansProjects\\Project\\src\\img\\icons8_Fingerprint_100px_4.png";
+        //Image im = new Image(iPath);
+        //this.fingerLoader.setImage(im);
+        System.out.println("got samples ");
+        this.samp = sample ;
+        capture.stopCapture();
+        
+        // sets template from the Dbase
+        this.setTempFromDBbytes() ;
+        
+        // compare both
+        if(verify(samp, temp)){
+            initDisp(null, true);
+        }else{
+            initDisp("verification failed", false);
+        }
+       
+    }
+    
+    //I did mentioned at the end of the enrollment file that 
+    // the best way to store the finger data after processing is to save in a blob
+    // well, these two method are handling that data 
+    
+    public void setTempFromDBbytes(){
+        try{
+            temp = DPFPGlobal.getTemplateFactory().createTemplate();
+            temp.deserialize(fromDB(this.scanAccNumTF.getText()));
+        }catch(NullPointerException ex){
+//            initDisp("null", false);
+        }
+    }    
+    public byte[] fromDB(String accNum){
+        ResultSet rs;
+        PreparedStatement st;
+        byte[] digital = null;     
+        
+        try {
+            rs = dc.fetch("SELECT * from CUSTOMER where ACCOUNTNO = '"+ accNum +"'") ;
+            if(rs.next()){
+                digital = rs.getBytes("fingerHash");  
+                
+                Thread t = new Thread(new Runnable() {
+                    @Override
+                    public void run() {
+                        Platform.runLater(new Runnable() {
+                            @Override
+                            public void run() {
+                                try{
+                                    foundAccName.setText( rs.getString("AccountName") );
+                                    foundAccNum.setText( rs.getString("ACCOUNTNO") );   
+                                    writeAccNum(rs.getString("ACCOUNTNO"));
+                                }catch(SQLException ex){
+                                    System.err.println("this is " + ex.getMessage());
+                                }
+                            }
+                        });                        
+                    }
+                });
+                t.start();
+                // sets the account found
+//                this.foundAccName.setText(rs.getString("accountName"));
+//                this.foundAccNum.setText(rs.getString("accountNo"));
+                if(digital == null){
+                    initDisp("null", false);
+                    return digital ;
+                }
+            }
+            else {
+                initDisp("not found", false);
+            }
+        } catch (Exception e) {
+            System.out.println(e.getMessage());
+        } 
+        return digital;
+    }
+     // to verify, this code gets an already analysed template [fro db, img, wherever]
+    // and compares it to the new sample gotten from the scanner
+    public boolean verify(DPFPSample sample, DPFPTemplate template) {		 
+        
+        DPFPVerification matcher = DPFPGlobal.getVerificationFactory().createVerification();
+        
+        matcher.setFARRequested(DPFPVerification.LOW_SECURITY_FAR);             
+        try { 
+            if (sample == null)
+                throw new Exception();
+ 
+            DPFPFeatureExtraction featureExtractor = DPFPGlobal.getFeatureExtractionFactory().createFeatureExtraction();
+            DPFPFeatureSet featureSet = featureExtractor.createFeatureSet(sample, DPFPDataPurpose.DATA_PURPOSE_VERIFICATION);			 
+            
+                if (template != null) {
+                    DPFPVerificationResult result = matcher.verify(featureSet, template);
+                    return result.isVerified();
+                } 
+            
+        } catch (Exception e) {
+            initDisp("verification error", false);
+        }          
+        return false; 
+    } 
+    
+    
+    // this is something that nearly made me give up
+    // I wanted a way to update the fxml thread in case of error or success .. kept getting this error [not on DPFPF thread]
+    // this thread is .. i don;t really understand this part, but it worked .. do some research on that
+    public void initDisp(String text, boolean stat){
+        System.out.println("this is stat " + stat);
+        Thread i = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                Platform.runLater(new Runnable() {
+                    @Override
+                    public void run() {                                
+
+                        String iPath = "" ;
+                        if(stat){
+                            iPath = "file:C:\\Users\\kandyb15\\Documents\\NetBeansProjects\\Project\\src\\img\\icons8_Fingerprint_100px_5.png";            
+                            accFoundPane.setVisible(stat) ;                            
+                        }else
+                        if(text.contains("null")){
+                            // fingerprint not enrolled for this account
+                            // retry scanning
+                            iPath = "file:C:\\Users\\kandyb15\\Documents\\NetBeansProjects\\Project\\src\\img\\icons8_Cancel_100px.png";
+                            lbPlaceFinger.setText("Error, Finger not enrolled");
+                        }else
+                        if(text.contains("verification error")){
+                            // An error occured try again
+                            // retry scanning
+                            iPath = "file:C:\\Users\\kandyb15\\Documents\\NetBeansProjects\\Project\\src\\img\\icons8_Cancel_100px.png";
+                            lbPlaceFinger.setText("Verification Failed");
+                        }else
+                        if(text.contains("verification failed")){
+                            // verification failed, retry
+                            // failed to match, try again
+                            iPath = "file:C:\\Users\\kandyb15\\Documents\\NetBeansProjects\\Project\\src\\img\\icons8_Cancel_100px.png";
+                            lbPlaceFinger.setText("Error, Verification Failed");
+                        }else
+                        if(text.contains("not found")){
+                            // Account does not exist
+                            // failed to match, try again          
+                            iPath = "file:C:\\Users\\kandyb15\\Documents\\NetBeansProjects\\Project\\src\\img\\icons8_Cancel_100px.png";
+                            lbPlaceFinger.setText("Error, Cannot Find Account");
+                        }
+                            Image im = new Image(iPath);
+                            fingerLoader.setImage(im);
+                            fingerSpinner.setVisible(false);
+                    }
+                });                        
+            }
+        });              
+        i.start();
+         
+    }
