@@ -1,0 +1,238 @@
+   ///////// Warning: this might get messy real quick ////////////////
+   
+// imports used in this class
+
+import com.digitalpersona.onetouch.DPFPDataPurpose;
+import com.digitalpersona.onetouch.DPFPFeatureSet;
+import com.digitalpersona.onetouch.DPFPGlobal;
+import com.digitalpersona.onetouch.DPFPSample;
+import com.digitalpersona.onetouch.DPFPTemplate;
+import com.digitalpersona.onetouch.capture.DPFPCapture;
+import com.digitalpersona.onetouch.capture.event.DPFPDataAdapter;
+import com.digitalpersona.onetouch.capture.event.DPFPDataEvent;
+import com.digitalpersona.onetouch.capture.event.DPFPErrorAdapter;
+import com.digitalpersona.onetouch.capture.event.DPFPErrorEvent;
+import com.digitalpersona.onetouch.capture.event.DPFPReaderStatusAdapter;
+import com.digitalpersona.onetouch.capture.event.DPFPReaderStatusEvent;
+import com.digitalpersona.onetouch.capture.event.DPFPSensorAdapter;
+import com.digitalpersona.onetouch.capture.event.DPFPSensorEvent;
+import com.digitalpersona.onetouch.processing.DPFPEnrollment;
+import com.digitalpersona.onetouch.processing.DPFPFeatureExtraction;
+import com.digitalpersona.onetouch.processing.DPFPImageQualityException;
+import java.awt.image.BufferedImage;
+import java.io.File;
+import java.io.IOException;
+   
+   
+       
+       
+    // scanner variables
+       
+    /*
+      DPFPFeatureSet
+      
+      A coin is a piece of metal,
+      what determines its value and ease of identification
+      are the grooves and design on the metal ()=> featuresinscripcion (for enrollment) & featuresverificacion (for verification)
+    */
+    public DPFPFeatureSet featuresinscripcion;
+    public DPFPFeatureSet featuresverificacion;
+    
+    /*
+      DPFPTemplate & DPFPSample
+      - just as you would compare a suspected counterfeit note with a genuine one
+      - the two serve that purpose
+    */    
+    DPFPTemplate temp ;
+    DPFPSample samp ;
+    
+    File file, copia;
+    byte[] b ;
+   
+    /*
+      think of this variable 'capture' as an X-ray cassette
+      - it is the memory of the machine
+      - it holds the image of your broken heart or bones
+    */
+    private DPFPCapture capture = DPFPGlobal.getCaptureFactory().createCapture();
+   
+    ///////////////
+   //////////////////////// for scanner /////////////////////////////////////
+  
+  
+  /*
+    I keep pressing [ctrl] + [/] for comments on git
+    
+    
+    okay, stopCapture and startScanning 
+      these two are event handlers on fxml buttons 
+      which were used to stop and start capturing .. similar to wiping an x-ray film
+      why you'd ask? well .. things break
+      
+  */
+    @FXML
+    void stopCapture(MouseEvent event) {        
+        capture.stopCapture();
+    }
+    @FXML
+    void startScanning(MouseEvent event) {
+        start();
+    }
+    
+    /*
+      this is like the power button of the whole process
+       similar to that of a micro wave .. it might be plugged in but not ready to heat anything until you get it started
+       
+       it adds useful event listeners that let's your program know when: 
+        - a finger is on the scanner 
+        - finger is off the scanner
+        - scanner is unplugged
+        - image quality is bad
+    */
+    public void initScanner(){
+        System.out.println("I'm up and running");
+        capture.addDataListener(new DPFPDataAdapter() {
+            @Override public void dataAcquired(final DPFPDataEvent e) {
+                processCapture(e.getSample());
+            };
+        });
+
+        capture.addReaderStatusListener(new DPFPReaderStatusAdapter() {
+            @Override public void readerConnected(final DPFPReaderStatusEvent e) {
+                System.out.println("this is " + e.getReaderStatus());
+            }
+
+            @Override public void readerDisconnected(final DPFPReaderStatusEvent e) {
+                System.out.println("reader connected" + e.getReaderStatus());
+            }
+        });
+
+        capture.addSensorListener(new DPFPSensorAdapter() {
+            @Override 
+                public void fingerTouched(final DPFPSensorEvent e) {
+                System.out.println("finger touched " + e);
+            }
+
+            @Override 
+            public void fingerGone(final DPFPSensorEvent e) {
+                capture.stopCapture();
+            }
+        });
+
+        capture.addErrorListener(new DPFPErrorAdapter(){
+            public void errorReader(final DPFPErrorEvent e){            
+                System.out.println("Something wong" + e.getError());
+            }
+        });
+    }
+    
+/*
+  check in initScanner(){} to see where this method 'processCapture' is called 
+  
+  what it does is recieve sample from the fingerprint scanner
+  and as you might guess.. process it
+*/ 
+    
+    public void processCapture(DPFPSample sample){
+        this.temp = this.getTemplate(sample) ; 
+        
+// 
+//        if(this.editMode){
+//            dc.updateFinger(this.accNo.getText(), temp) ;
+//        }        
+
+// 
+        java.awt.Image i = createImage(sample) ;
+        setImage(i);
+        System.err.println("temp is currently " + temp);
+    }    
+    
+    /*
+      this method is a .. hack? (for lack of a better word)
+      
+      it converts the java awt image to a png to be displayed on the screen
+    */
+    public void setImage(java.awt.Image image) {
+            BufferedImage im = new BufferedImage(image.getWidth(null), image.getHeight(null), BufferedImage.TYPE_INT_RGB);
+            im.getGraphics().drawImage(image, 0, 0, null);
+        try {
+            ImageIO.write(im,"png", new File("prints/temp.png"));            
+            
+        } catch (IOException ex) {
+            System.err.println("this happened " + ex.getMessage());
+        }finally{
+            String iPath = "file:prints/temp.png";
+            javafx.scene.image.Image i = new javafx.scene.image.Image(iPath);
+                this.fingerScan.setImage(i);
+        }
+    }    
+    
+    /*
+      I believe this method create a blueprint of the data sample it get
+      
+      - imagine building a 15 storey, 
+      you will need weight of beams, soil samples, tetonic plates movement and many other datasets
+      
+      - I think what this does is get the 
+      grooves, contours, ridges etc on the finger into a blueprint that can be easily stored and identified
+    */
+    public DPFPTemplate getTemplate (DPFPSample forEnrol){    
+        DPFPTemplate template = null;
+        try {             
+            DPFPFeatureExtraction featureExtractor = DPFPGlobal.getFeatureExtractionFactory().createFeatureExtraction();
+            DPFPEnrollment enrollment = DPFPGlobal.getEnrollmentFactory().createEnrollment();             
+            while (enrollment.getFeaturesNeeded() > 0)
+            { 
+                DPFPSample sample = forEnrol ;
+                if (sample == null)
+                    continue;  
+                DPFPFeatureSet featureSet;
+                try { 
+                    featureSet = featureExtractor.createFeatureSet(sample, DPFPDataPurpose.DATA_PURPOSE_ENROLLMENT);
+                } catch (DPFPImageQualityException e) {                    
+                    continue; 
+                }  
+                enrollment.addFeatures(featureSet);
+            } 
+            template = enrollment.getTemplate();
+//            this.scannerStat("Capture Success!");
+            capture.stopCapture();
+        } catch (DPFPImageQualityException e) {
+//            this.scannerStat("Capture Failed!");
+            capture.stopCapture();
+        }
+        return template ;
+    }        
+    
+    public DPFPTemplate tempFromImg(byte[] file){
+        return DPFPGlobal.getTemplateFactory().createTemplate(file);
+    }    
+    
+    /*
+      converts sample into java awt image
+      
+      - which i still had to reconvert above because I was using fxml
+    */
+    public java.awt.Image createImage(DPFPSample sample) {
+         return DPFPGlobal.getSampleConversionFactory().createImage(sample);
+    }    
+    public void stop(){
+        capture.stopCapture();
+    }
+    public void start(){
+        capture.startCapture();
+        //this.fingerScanStat.setText("Ready to capture");
+    }
+    
+    /*
+      Uhmmmm, I ran into an obstacle trying to save this finger print data in an image file
+      then reading it from there for verification
+      
+      -- the problem I think is that something happens to the scan as it is converted to image
+      -- best way to store it is to use a binary stream and save it into sql column type of 'blob' 
+      -- it is roughly 1kb in size
+    */
+    
+    /////////////////////////////////////////////////////////////////////////////////
+    ////////////////////// No event handler beyond this point ///////////////////////
+    /////////////////////////////////////////////////////////////////////////////////
